@@ -1,7 +1,10 @@
-streamlit
-pandas
-matplotlib
-numpy
-plotly
-altair
-reportlab
+streamlit>=1.24.0
+pandas>=1.5.0
+numpy>=1.22.0
+matplotlib>=3.5.0
+plotly>=5.10.0
+altair>=4.2.0
+reportlab>=3.6.0
+io
+base64
+datetime
