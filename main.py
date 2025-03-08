@@ -18,7 +18,23 @@ import locale
 from datetime import datetime
 
 # Configurar a localização para formatação adequada de números em português
-locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+# Tratamento para evitar erros em diferentes ambientes (como Streamlit Cloud)
+try:
+    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+except locale.Error:
+    try:
+        # Tentar alternativas comuns
+        locale.setlocale(locale.LC_ALL, 'pt_BR')
+    except locale.Error:
+        try:
+            # Fallback para português de Portugal se Brasil não estiver disponível
+            locale.setlocale(locale.LC_ALL, 'pt_PT.UTF-8')
+        except locale.Error:
+            try:
+                locale.setlocale(locale.LC_ALL, 'pt_PT')
+            except locale.Error:
+                # Se nenhum locale português estiver disponível, usar o padrão do sistema
+                locale.setlocale(locale.LC_ALL, '')
 
 # Configurar a página
 st.set_page_config(
@@ -27,9 +43,25 @@ st.set_page_config(
     layout="wide",
 )
 
-# Função para formatar valores monetários
+# Função para formatar valores monetários sem depender totalmente do locale
 def format_currency(value):
-    return f"R$ {value:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    try:
+        # Tentar usar o locale configurado
+        return locale.currency(value, grouping=True, symbol=True)
+    except (locale.Error, ValueError):
+        # Formatação manual caso o locale falhe
+        if value >= 0:
+            text = f"R$ {value:,.2f}"
+            # Ajustar para padrão brasileiro (ponto como separador de milhares, vírgula para decimais)
+            if ',' in text:
+                text = text.replace(',', 'X').replace('.', ',').replace('X', '.')
+            return text
+        else:
+            # Para valores negativos
+            text = f"R$ -{abs(value):,.2f}"
+            if ',' in text:
+                text = text.replace(',', 'X').replace('.', ',').replace('X', '.')
+            return text
 
 # Função para formatar horas
 def format_hours(hours):
