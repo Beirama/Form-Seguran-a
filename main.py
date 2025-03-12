@@ -15,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 import io
 import locale
-from datetime import datetime
+from datetime import datetime, date
 import re
 
 # Configurar a localização para formatação adequada de números em português
@@ -815,6 +815,7 @@ def save_user_data():
     st.session_state.user_data['telefone'] = st.session_state.telefone
     st.session_state.user_data['email'] = st.session_state.email
     st.session_state.user_data['empresa'] = st.session_state.empresa
+    st.session_state.user_data['industry'] = st.session_state.industry  # Corrigido: Guardar o setor selecionado
     
     # Validar dados antes de prosseguir
     if not st.session_state.nome_completo:
@@ -1228,7 +1229,18 @@ else:
         
         num_incidents = st.number_input("Quantos ataques cibernéticos sua empresa sofreu nos últimos 12 meses?", min_value=0, value=0, step=1, key="roi_num_incidents")
         cost_per_incident = st.number_input("Qual foi o custo médio de cada incidente? (R$)", min_value=0.0, value=0.0, step=1000.0, key="roi_cost_per_incident")
-        hours_per_incident = st.number_input("Quanto tempo sua equipe gastou para mitigar cada incidente? (horas)", min_value=0.0, value=0.0, step=1.0, key="roi_hours_per_incident")
+        
+        # Campo de tempo corrigido para usar formato de horas
+        st.subheader("Tempo gasto para mitigar cada incidente")
+        col1, col2 = st.columns(2)
+        with col1:
+            hours = st.number_input("Horas", min_value=0, value=0, step=1, key="roi_hours")
+        with col2:
+            minutes = st.number_input("Minutos", min_value=0, max_value=59, value=0, step=5, key="roi_minutes")
+        
+        # Calcular o valor total em horas
+        hours_per_incident = hours + (minutes / 60)
+        
         hourly_cost = st.number_input("Qual o custo médio por hora dos profissionais envolvidos na mitigação? (R$)", min_value=0.0, value=0.0, step=10.0, key="roi_hourly_cost")
         
         # Dados históricos de incidentes (opcional)
@@ -1236,12 +1248,40 @@ else:
         show_history = st.checkbox("Adicionar dados históricos de incidentes", key="roi_show_history")
         
         if show_history:
+            # Definir todos os meses do ano
+            all_months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+            
+            # Adicionar seleção de período personalizado
+            st.subheader("Selecione o período de interesse")
+            period_option = st.radio("Escolha uma opção:", 
+                                   ["Todo o ano", "Período personalizado"],
+                                   key="period_option")
+            
+            if period_option == "Todo o ano":
+                selected_months = all_months
+            else:
+                # Seletor de período personalizado
+                start_month, end_month = st.select_slider(
+                    "Selecione o intervalo de meses:",
+                    options=all_months,
+                    value=(all_months[0], all_months[-1]),
+                    key="month_range"
+                )
+                
+                # Extrair o período selecionado
+                start_idx = all_months.index(start_month)
+                end_idx = all_months.index(end_month)
+                selected_months = all_months[start_idx:end_idx+1]
+            
+            # Criar interface para entrada dos dados históricos
             col1, col2 = st.columns(2)
             with col1:
                 incidents_history = {}
-                months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho"]
-                for month in months:
-                    incidents_history[month] = st.number_input(f"Número de incidentes em {month}:", min_value=0, value=0, step=1, key=f"hist_{month}")
+                # Usar apenas os meses selecionados
+                for month in selected_months:
+                    incidents_history[month] = st.number_input(f"Número de incidentes em {month}:", 
+                                                             min_value=0, value=0, step=1, 
+                                                             key=f"hist_{month}")
             
             # Criar DataFrame com os dados históricos
             incidents_data = pd.DataFrame({
@@ -1266,7 +1306,17 @@ else:
         if reduced_incidents == "Sim":
             new_num_incidents = st.number_input("Número reduzido de ataques por ano após o investimento:", min_value=0, value=0, step=1, key="roi_new_num_incidents")
             new_cost_per_incident = st.number_input("Novo custo médio por incidente após o investimento (R$):", min_value=0.0, value=0.0, step=1000.0, key="roi_new_cost_per_incident")
-            new_hours_per_incident = st.number_input("Novo tempo de resposta por incidente (horas):", min_value=0.0, value=0.0, step=1.0, key="roi_new_hours_per_incident")
+            
+            # Novo campo de tempo para a mitigação após o investimento
+            st.subheader("Novo tempo de mitigação após investimento")
+            col1, col2 = st.columns(2)
+            with col1:
+                new_hours = st.number_input("Horas", min_value=0, value=0, step=1, key="roi_new_hours")
+            with col2:
+                new_minutes = st.number_input("Minutos", min_value=0, max_value=59, value=0, step=5, key="roi_new_minutes")
+            
+            # Calcular novo valor total em horas
+            new_hours_per_incident = new_hours + (new_minutes / 60)
         else:
             new_num_incidents = num_incidents
             new_cost_per_incident = cost_per_incident
@@ -1704,17 +1754,10 @@ else:
                 unsafe_allow_html=True
             )
 
-    # Seção de Resumo Completo
-    st.markdown("<h2 id='resumo'>📊 Resumo Completo da Avaliação</h2>", unsafe_allow_html=True)
+    # Seção para Download do Relatório Completo
+    st.markdown("<h2 id='relatorio'>📊 Relatório Completo da Avaliação</h2>", unsafe_allow_html=True)
     
-    # Definir se a seção deve estar expandida
-    summary_expanded = True
-    
-    summary_section = st.expander("Visualizar Resumo Completo", expanded=summary_expanded)
-    
-    with summary_section:
-        st.subheader(f"Resumo Completo da Avaliação para {st.session_state.user_data['empresa']}")
-        
+    with st.container():
         # Verificar quais análises foram realizadas
         has_vulnerability = 'vulnerability_results' in st.session_state and st.session_state.vulnerability_results
         has_roi = 'roi_results' in st.session_state and st.session_state.roi_results
@@ -1730,148 +1773,9 @@ else:
             incomplete_data.append("Benchmarking")
         
         if incomplete_data:
-            st.warning(f"Atenção: Você ainda não completou as seguintes análises: {', '.join(incomplete_data)}. Para um relatório completo, recomendamos preencher todas as seções.")
+            st.warning(f"⚠️ Atenção: Você ainda não completou as seguintes análises: {', '.join(incomplete_data)}. Para um relatório completo, recomendamos preencher todas as seções.")
         else:
-            st.success("Parabéns! Você completou todas as análises. Abaixo está o resumo completo.")
-        
-        # Dados do usuário
-        st.write("### 👤 Dados do Contato")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"**Nome**: {st.session_state.user_data['nome_completo']}")
-            st.write(f"**Telefone**: {st.session_state.user_data['telefone']}")
-        with col2:
-            st.write(f"**E-mail**: {st.session_state.user_data['email']}")
-            st.write(f"**Empresa**: {st.session_state.user_data['empresa']}")
-        st.write(f"**Setor**: {st.session_state.user_data['industry']}")
-        
-        # Resultados de Vulnerabilidade
-        if has_vulnerability:
-            st.write("### 🔒 Resultados da Avaliação de Vulnerabilidade")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                score = st.session_state.vulnerability_results["Pontuação Geral"]
-                risk_level = st.session_state.vulnerability_results["Nível de Risco"]
-                
-                # Mostrar o medidor de pontuação
-                gauge_chart = create_gauge_chart_plotly(score)
-                st.plotly_chart(gauge_chart, use_container_width=True, key="gauge_summary")
-                
-                if score <= 40:
-                    st.error(f"🚨 Nível de Risco: **{risk_level}**")
-                elif score <= 70:
-                    st.warning(f"⚠️ Nível de Risco: **{risk_level}**")
-                else:
-                    st.success(f"✅ Nível de Risco: **{risk_level}**")
-            
-            with col2:
-                # Pontuações por categoria
-                category_scores = {
-                    "Infraestrutura": st.session_state.vulnerability_results["Pontuação Infraestrutura"],
-                    "Políticas": st.session_state.vulnerability_results["Pontuação Políticas"],
-                    "Proteção": st.session_state.vulnerability_results["Pontuação Proteção"]
-                }
-                category_chart = create_category_chart_plotly(category_scores)
-                st.plotly_chart(category_chart, use_container_width=True, key="category_summary")
-            
-# Vulnerabilidades e recomendações
-st.subheader("Vulnerabilidades e Recomendações")
-show_vuln_rec = st.checkbox("Mostrar detalhes de vulnerabilidades e recomendações", 
-                            key="show_vuln_rec_summary")
-
-if show_vuln_rec:
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Principais Vulnerabilidades")
-        if "Vulnerabilidades" in st.session_state.vulnerability_results and st.session_state.vulnerability_results["Vulnerabilidades"]:
-            for vuln in st.session_state.vulnerability_results["Vulnerabilidades"]:
-                st.error(f"• {vuln}")
-        else:
-            st.success("Não foram detectadas vulnerabilidades significativas.")
-    
-    with col2:
-        st.subheader("Recomendações de Segurança")
-        if "Recomendações" in st.session_state.vulnerability_results and st.session_state.vulnerability_results["Recomendações"]:
-            for rec in st.session_state.vulnerability_results["Recomendações"]:
-                st.info(f"✓ {rec}")
-        else:
-            st.warning("### 🔒 Avaliação de Vulnerabilidade não realizada")
-            if st.button("Ir para Teste de Vulnerabilidade", key="goto_vuln"):
-                st.rerun()
-        
-        # Resultados de ROI
-        if has_roi:
-            st.write("### 💰 Resultados da Análise de ROI")
-            
-            investment = st.session_state.roi_results["Investimento"]
-            savings = st.session_state.roi_results["Economia"]
-            roi = st.session_state.roi_results["ROI"]
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric("Investimento", format_currency(investment))
-                st.metric("Economia", format_currency(savings))
-                if "Perda de Clientes" in st.session_state.roi_results:
-                    st.metric("Perda de Receita", format_currency(st.session_state.roi_results["Perda de Clientes"]))
-            
-            with col2:
-                # Exibir o ROI com cor apropriada
-                if roi >= 0:
-                    st.success(f"ROI: **{format_percent(roi)}**")
-                else:
-                    st.error(f"ROI: **{format_percent(roi)}**")
-                    
-                if "Impacto Total" in st.session_state.roi_results:
-                    if st.session_state.roi_results["Impacto Total"] >= 0:
-                        st.success(f"Impacto Total: **{format_currency(st.session_state.roi_results['Impacto Total'])}**")
-                    else:
-                        st.error(f"Impacto Total: **{format_currency(st.session_state.roi_results['Impacto Total'])}**")
-                        
-            # Mostrar gráfico de ROI
-            if "Custo Total Antes" in st.session_state.roi_results and "Custo Total Depois" in st.session_state.roi_results:
-                roi_chart = create_roi_chart_plotly(
-                    investment, 
-                    st.session_state.roi_results["Custo Total Antes"], 
-                    st.session_state.roi_results["Custo Total Depois"]
-                )
-                st.plotly_chart(roi_chart, use_container_width=True, key="roi_summary")
-        else:
-            st.warning("### 💰 Análise de ROI não realizada")
-            if st.button("Ir para Calculadora de ROI", key="goto_roi"):
-                st.rerun()
-        
-        # Resultados de Benchmarking
-        if has_benchmark:
-            st.write("### 🌐 Resultados do Benchmarking")
-            
-            benchmark_results = st.session_state.benchmark_results
-            company_scores = benchmark_results["Company"]
-            industry_data = benchmark_results["Industry"]
-            industry = benchmark_results["IndustryName"]
-            
-            # Gráfico de radar comparativo
-            radar_chart = create_radar_chart(company_scores, get_benchmark_data(), industry)
-            st.plotly_chart(radar_chart, use_container_width=True, key="radar_summary")
-            
-            # Status geral
-            company_total = company_scores["Total"]
-            industry_total = industry_data["Total"]
-            difference = company_total - industry_total
-            
-            if difference >= 0:
-                st.success(f"Sua empresa está **{difference:+.1f}%** acima da média do setor **{industry}**.")
-            else:
-                st.error(f"Sua empresa está **{difference:+.1f}%** abaixo da média do setor **{industry}**.")
-        elif has_vulnerability:
-            st.warning("### 🌐 Benchmarking não realizado")
-            if st.button("Ir para Benchmarking", key="goto_benchmark"):
-                st.rerun()
-        
-        # Download do relatório completo
-        st.write("### 📑 Relatório Completo")
+            st.success("✅ Parabéns! Você completou todas as análises e seu relatório está pronto para download.")
         
         # Preparar dados para relatório integrado
         all_results = {}
@@ -1905,15 +1809,30 @@ if show_vuln_rec:
         # Criar PDF para download
         pdf_data = create_pdf_report(all_results, all_vulnerabilities, all_recommendations, st.session_state.user_data['empresa'])
         
-        # Botão para download do relatório PDF completo
-        st.markdown(
-            get_pdf_download_link(
-                pdf_data, 
-                f"relatorio_completo_{st.session_state.user_data['empresa'].replace(' ', '_')}.pdf", 
-                "📥 Baixar Relatório Completo em PDF"
-            ), 
-            unsafe_allow_html=True
-        )
+        # Seção de download com destaque
+        st.markdown("### 📥 Download do Relatório Completo")
+        st.info("""
+        O relatório completo inclui:
+        - Resumo executivo de todas as análises realizadas
+        - Detalhes das vulnerabilidades identificadas
+        - Recomendações personalizadas
+        - Análise financeira de ROI (se realizada)
+        - Benchmarking do setor (se realizado)
+        """)
+        
+        # Botão para download do relatório PDF completo em destaque
+        centered_col = st.columns([1, 2, 1])[1]  # Criar uma coluna centralizada
+        with centered_col:
+            st.markdown(
+                get_pdf_download_link(
+                    pdf_data, 
+                    f"relatorio_completo_{st.session_state.user_data['empresa'].replace(' ', '_')}.pdf", 
+                    "📥 BAIXAR RELATÓRIO COMPLETO EM PDF"
+                ), 
+                unsafe_allow_html=True
+            )
+        
+        st.markdown("---")
         
         # Botões de ação
         col1, col2 = st.columns(2)
@@ -1927,12 +1846,6 @@ if show_vuln_rec:
                 # Reinicializar
                 initialize_session_state()
                 st.rerun()
-        
-       # with col2:
-            #if st.button("Editar Informações de Contato", key="edit_contact"):
-                #st.session_state.user_registered = False
-                #st.rerun()
-
 # Rodapé
 st.markdown("---")
 st.markdown("Desenvolvido por Beirama para avaliação de segurança da informação | © 2025")
