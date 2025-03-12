@@ -17,6 +17,7 @@ import io
 import locale
 from datetime import datetime, date
 import re
+from PIL import Image as PILImage  # Adicionando a importação da PIL
 
 # Configurar a localização para formatação adequada de números em português
 # Tratamento para evitar erros em diferentes ambientes (como Streamlit Cloud)
@@ -73,6 +74,20 @@ def format_hours(hours):
 def format_percent(value):
     return f"{value:.1f}%"
 
+# Função para converter figura Plotly em imagem para o PDF
+def plotly_fig_to_image(fig, width=700, height=400, scale=1):
+    """Converte uma figura Plotly em imagem para usar no PDF."""
+    img_bytes = fig.to_image(format="png", width=width, height=height, scale=scale)
+    img_buffer = io.BytesIO(img_bytes)
+    img = PILImage.open(img_buffer)
+    
+    # Convertendo para o formato que o ReportLab pode usar
+    img_bytes_for_reportlab = io.BytesIO()
+    img.save(img_bytes_for_reportlab, format='PNG')
+    img_bytes_for_reportlab.seek(0)
+    
+    return img_bytes_for_reportlab
+
 # Dados de benchmarking por setor
 def get_benchmark_data():
     return {
@@ -121,7 +136,7 @@ def get_benchmark_data():
     }
 
 # Função para criar PDF completo com os resultados
-def create_pdf_report(results, vulnerabilities, recommendations, company_name="Sua Empresa"):
+def create_pdf_report(results, vulnerabilities, recommendations, company_name="Sua Empresa", report_type=None, figures=None):
     buffer = io.BytesIO()
     # Usar margens menores para mais espaço útil na página
     doc = SimpleDocTemplate(
@@ -154,6 +169,15 @@ def create_pdf_report(results, vulnerabilities, recommendations, company_name="S
         textColor=colors.darkblue
     )
     
+    section_style = ParagraphStyle(
+        'SectionStyle',
+        parent=styles['Heading3'],
+        fontSize=14,
+        spaceBefore=12,
+        spaceAfter=8,
+        textColor=colors.darkblue
+    )
+    
     normal_style = ParagraphStyle(
         'NormalStyle',
         parent=styles['Normal'],
@@ -170,277 +194,938 @@ def create_pdf_report(results, vulnerabilities, recommendations, company_name="S
     )
     
     # Cabeçalho do relatório
-    elements.append(Paragraph(f"RELATÓRIO DE SEGURANÇA DE DADOS", title_style))
+    if report_type == "complete":
+        elements.append(Paragraph(f"RELATÓRIO COMPLETO DE SEGURANÇA DE DADOS", title_style))
+    else:
+        elements.append(Paragraph(f"RELATÓRIO DE SEGURANÇA DE DADOS", title_style))
     elements.append(Paragraph(f"{company_name}", subtitle_style))
     elements.append(Paragraph(f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", date_style))
     elements.append(Spacer(1, 0.5*inch))
     
-    # Determinar que tipo de relatório estamos gerando com base nas chaves presentes
-    report_type = ""
-    if 'Pontuação Geral' in results and 'Pontuação Infraestrutura' in results:
-        report_type = "vulnerability"
-    elif 'Investimento' in results and 'Economia' in results:
-        report_type = "roi"
-    elif 'Média do Setor' in results and 'Diferença' in results:
-        report_type = "benchmark"
-    
-    # Resumo de resultados com formatação baseada no tipo de relatório
-    if report_type == "vulnerability":
-        elements.append(Paragraph("RESUMO DA AVALIAÇÃO DE VULNERABILIDADE", subtitle_style))
+    # Relatório Completo - incluindo todas as análises
+    if report_type == "complete":
+        # Seção de Resumo Executivo
+        elements.append(Paragraph("RESUMO EXECUTIVO", subtitle_style))
         
-        # Tabela de resumo para relatório de vulnerabilidade
-        table_data = [["Métrica", "Valor", "Classificação"]]
+        # Sumário com principais pontos
+        summary_text = f"""Este relatório apresenta uma análise completa de segurança de dados para {company_name}, 
+        incluindo avaliação de vulnerabilidades, análise de retorno sobre investimento (ROI) e benchmarking de segurança 
+        comparado ao setor. O objetivo é fornecer uma visão abrangente do estado atual de segurança da informação 
+        e orientações para melhoria."""
         
-        # Pontuação geral com destaque
-        risk_level = results.get('Nível de Risco', '')
-        risk_color = colors.red if risk_level == "Crítico" else colors.orange if risk_level == "Moderado" else colors.green
+        elements.append(Paragraph(summary_text, normal_style))
+        elements.append(Spacer(1, 0.2*inch))
         
-        table_data.append([
-            Paragraph("<b>Pontuação Geral</b>", normal_style),
-            Paragraph(f"<b>{format_percent(results['Pontuação Geral'])}</b>", normal_style),
-            Paragraph(f"<font color={risk_color}><b>{risk_level}</b></font>", normal_style)
-        ])
+        # Tabela de resumo executivo com principais métricas
+        table_data = [["Métrica", "Valor", "Status"]]
         
-        # Outras métricas
-        if 'Pontuação Infraestrutura' in results:
-            table_data.append([
-                "Infraestrutura", 
-                format_percent(results['Pontuação Infraestrutura']),
-                ""
-            ])
-        
-        if 'Pontuação Políticas' in results:
-            table_data.append([
-                "Políticas", 
-                format_percent(results['Pontuação Políticas']),
-                ""
-            ])
+        # Adicionar métricas principais de cada análise
+        if 'Pontuação Geral' in results:
+            risk_level = results.get('Nível de Risco', '')
+            risk_color = colors.red if risk_level == "Crítico" else colors.orange if risk_level == "Moderado" else colors.green
             
-        if 'Pontuação Proteção' in results:
             table_data.append([
-                "Proteção", 
-                format_percent(results['Pontuação Proteção']),
-                ""
-            ])
-            
-        if 'Total de Vulnerabilidades' in results:
-            table_data.append([
-                "Vulnerabilidades Detectadas", 
-                str(results['Total de Vulnerabilidades']),
-                ""
-            ])
-            
-    elif report_type == "roi":
-        elements.append(Paragraph("ANÁLISE DE RETORNO SOBRE INVESTIMENTO (ROI)", subtitle_style))
-        
-        # Tabela de resumo para relatório de ROI
-        table_data = [["Métrica", "Valor", ""]]
-        
-        if 'Investimento' in results:
-            table_data.append([
-                "Investimento em Segurança", 
-                format_currency(results['Investimento']),
-                ""
-            ])
-            
-        if 'Economia' in results:
-            table_data.append([
-                "Economia Projetada", 
-                format_currency(results['Economia']),
-                ""
+                Paragraph("<b>Pontuação Geral de Segurança</b>", normal_style),
+                Paragraph(f"<b>{format_percent(results['Pontuação Geral'])}</b>", normal_style),
+                Paragraph(f"<font color={risk_color}><b>{risk_level}</b></font>", normal_style)
             ])
             
         if 'ROI' in results:
-            # Formatar o ROI com cor baseada no valor
             roi_value = results['ROI']
             roi_color = colors.green if roi_value > 0 else colors.red
             
             table_data.append([
-                "Retorno sobre Investimento (ROI)", 
+                "ROI em Segurança", 
                 Paragraph(f"<font color={roi_color}><b>{format_percent(roi_value)}</b></font>", normal_style),
                 ""
             ])
             
-        if 'Perda de Clientes' in results:
-            table_data.append([
-                "Perda de Receita (Clientes)", 
-                format_currency(results['Perda de Clientes']),
-                ""
-            ])
-            
-        if 'Impacto Total' in results:
-            table_data.append([
-                "Impacto Financeiro Total", 
-                format_currency(results['Impacto Total']),
-                ""
-            ])
-            
-    elif report_type == "benchmark":
-        elements.append(Paragraph("ANÁLISE COMPARATIVA DE BENCHMARKING", subtitle_style))
-        
-        # Tabela de resumo para relatório de benchmarking
-        table_data = [["Métrica", "Valor", "Status"]]
-        
-        if 'Pontuação Geral' in results:
-            table_data.append([
-                "Pontuação da Empresa", 
-                format_percent(results['Pontuação Geral']),
-                ""
-            ])
-            
         if 'Média do Setor' in results:
-            table_data.append([
-                "Média do Setor", 
-                format_percent(results['Média do Setor']),
-                ""
-            ])
-            
-        if 'Diferença' in results:
-            # Formatar a diferença com cor baseada no valor
-            diff_value = results['Diferença']
+            diff_value = results.get('Diferença com Setor', 0)
             diff_color = colors.green if diff_value >= 0 else colors.red
-            diff_status = results.get('Nível de Risco', '')
+            diff_status = "Acima da Média" if diff_value >= 0 else "Abaixo da Média"
             
             table_data.append([
-                "Diferença", 
+                "Comparação com Setor", 
                 Paragraph(f"<font color={diff_color}><b>{diff_value:+.1f}%</b></font>", normal_style),
                 diff_status
             ])
             
-        if 'Pontuação Infraestrutura' in results:
+        if 'Total de Vulnerabilidades' in results:
+            vuln_count = results['Total de Vulnerabilidades']
+            vuln_color = colors.red if vuln_count > 5 else colors.orange if vuln_count > 2 else colors.green
+            
             table_data.append([
-                "Infraestrutura", 
-                format_percent(results['Pontuação Infraestrutura']),
-                ""
+                "Vulnerabilidades Identificadas", 
+                Paragraph(f"<font color={vuln_color}><b>{vuln_count}</b></font>", normal_style),
+                "Crítico" if vuln_count > 5 else "Moderado" if vuln_count > 2 else "Baixo"
             ])
             
-        if 'Pontuação Políticas' in results:
-            table_data.append([
-                "Políticas", 
-                format_percent(results['Pontuação Políticas']),
-                ""
-            ])
-            
-        if 'Pontuação Proteção' in results:
-            table_data.append([
-                "Proteção", 
-                format_percent(results['Pontuação Proteção']),
-                ""
-            ])
-    else:
-        # Relatório genérico se não for identificado um tipo específico
-        elements.append(Paragraph("RESUMO DE RESULTADOS", subtitle_style))
+        table = Table(table_data, colWidths=[2.4*inch, 1.8*inch, 1.8*inch])
         
-        # Tabela de dados genérica
-        table_data = [["Métrica", "Valor", ""]]
-        for key, value in results.items():
-            # Determinar o formato adequado com base no nome da chave e no tipo do valor
-            if isinstance(value, (int, float)) and 'percent' in key.lower() or key.lower() in ['roi', 'pontuação']:
-                formatted_value = format_percent(value)
-            elif isinstance(value, (int, float)) and any(term in key.lower() for term in ['custo', 'valor', 'preço', 'investimento']):
-                formatted_value = format_currency(value)
-            else:
-                formatted_value = str(value)
+        # Estilo da tabela
+        table_style = [
+            # Cabeçalho
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            
+            # Corpo da tabela
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (0, -1), colors.black),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            
+            # Valores (coluna do meio) alinhados à direita
+            ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+            ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
+            
+            # Classificação (última coluna) centralizada
+            ('ALIGN', (2, 1), (2, -1), 'CENTER'),
+            
+            # Linhas alternadas com cores suaves
+            ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),
+            ('BACKGROUND', (0, 3), (-1, 3), colors.lightgrey),
+            
+            # Bordas refinadas
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('LINEABOVE', (0, 1), (-1, 1), 1, colors.black),
+        ]
+        
+        table.setStyle(TableStyle(table_style))
+        elements.append(table)
+        elements.append(Spacer(1, 0.4*inch))
+        
+        # SEÇÃO 1: TESTE DE VULNERABILIDADE
+        if 'Pontuação Geral' in results and 'Pontuação Infraestrutura' in results:
+            elements.append(Paragraph("PARTE 1: AVALIAÇÃO DE VULNERABILIDADE", subtitle_style))
+            
+            # Adicionar gráfico do velocímetro se disponível
+            if figures and 'gauge' in figures:
+                elements.append(Paragraph("Nível de Segurança", section_style))
                 
-            table_data.append([key, formatted_value, ""])
+                # Converter figura para imagem
+                img_data = plotly_fig_to_image(figures['gauge'])
+                img = Image(img_data, width=450, height=250)
+                elements.append(img)
+                elements.append(Spacer(1, 0.2*inch))
+            
+            # Tabela de vulnerabilidade
+            vuln_data = [["Métrica", "Valor", "Classificação"]]
+            
+            # Pontuação geral com destaque
+            risk_level = results.get('Nível de Risco', '')
+            risk_color = colors.red if risk_level == "Crítico" else colors.orange if risk_level == "Moderado" else colors.green
+            
+            vuln_data.append([
+                Paragraph("<b>Pontuação Geral</b>", normal_style),
+                Paragraph(f"<b>{format_percent(results['Pontuação Geral'])}</b>", normal_style),
+                Paragraph(f"<font color={risk_color}><b>{risk_level}</b></font>", normal_style)
+            ])
+            
+            # Outras métricas
+            if 'Pontuação Infraestrutura' in results:
+                vuln_data.append([
+                    "Infraestrutura", 
+                    format_percent(results['Pontuação Infraestrutura']),
+                    ""
+                ])
+            
+            if 'Pontuação Políticas' in results:
+                vuln_data.append([
+                    "Políticas", 
+                    format_percent(results['Pontuação Políticas']),
+                    ""
+                ])
+                
+            if 'Pontuação Proteção' in results:
+                vuln_data.append([
+                    "Proteção", 
+                    format_percent(results['Pontuação Proteção']),
+                    ""
+                ])
+                
+            if 'Total de Vulnerabilidades' in results:
+                vuln_data.append([
+                    "Vulnerabilidades Detectadas", 
+                    str(results['Total de Vulnerabilidades']),
+                    ""
+                ])
+                
+            # Criar tabela de vulnerabilidade
+            vuln_table = Table(vuln_data, colWidths=[2.4*inch, 1.8*inch, 1.8*inch])
+            vuln_table.setStyle(TableStyle(table_style))
+            elements.append(vuln_table)
+            elements.append(Spacer(1, 0.3*inch))
+            
+            # Adicionar gráfico de categorias se disponível
+            if figures and 'category' in figures:
+                elements.append(Paragraph("Pontuação por Categoria", section_style))
+                
+                # Converter figura para imagem
+                img_data = plotly_fig_to_image(figures['category'])
+                img = Image(img_data, width=450, height=250)
+                elements.append(img)
+                elements.append(Spacer(1, 0.2*inch))
+            
+            # Explicação sobre a pontuação
+            if 'Pontuação Geral' in results:
+                score = results['Pontuação Geral']
+                if score <= 40:
+                    vuln_explanation = """
+                    <b>RISCO CRÍTICO:</b> A segurança da empresa está extremamente vulnerável. 
+                    Há alto risco de sofrer ataques cibernéticos que podem resultar em perda de dados, 
+                    fraudes e violações de compliance. É necessário implementar medidas de segurança urgentemente.
+                    """
+                elif score <= 70:
+                    vuln_explanation = """
+                    <b>RISCO MODERADO:</b> A empresa possui algumas medidas de segurança, mas há brechas significativas. 
+                    Um ataque pode comprometer as operações e informações sensíveis. É recomendado fortalecer 
+                    os controles de segurança existentes.
+                    """
+                else:
+                    vuln_explanation = """
+                    <b>SEGURANÇA ACEITÁVEL:</b> A empresa tem uma boa estrutura de segurança, mas ainda pode melhorar. 
+                    O ideal é refinar processos e testar a resiliência contra ameaças cada vez mais sofisticadas.
+                    """
+                
+                elements.append(Paragraph(vuln_explanation, normal_style))
+            
+            # Adicionar vulnerabilidades se existirem
+            if vulnerabilities:
+                elements.append(Spacer(1, 0.2*inch))
+                elements.append(Paragraph("VULNERABILIDADES IDENTIFICADAS", section_style))
+                
+                # Adicionar cada vulnerabilidade com número
+                for i, vuln in enumerate(vulnerabilities, 1):
+                    vuln_text = Paragraph(
+                        f"<strong>{i}.</strong> {vuln}",
+                        ParagraphStyle(
+                            'VulnStyle',
+                            parent=styles['Normal'],
+                            fontSize=10,
+                            textColor=colors.darkred,
+                            leftIndent=15,
+                            spaceBefore=6,
+                            spaceAfter=6
+                        )
+                    )
+                    elements.append(vuln_text)
+            
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # SEÇÃO 2: ANÁLISE DE ROI
+        if 'Investimento' in results and 'Economia' in results:
+            elements.append(Paragraph("PARTE 2: ANÁLISE DE RETORNO SOBRE INVESTIMENTO (ROI)", subtitle_style))
+            
+            # Adicionar gráfico de ROI se disponível
+            if figures and 'roi' in figures:
+                elements.append(Paragraph("Análise de ROI", section_style))
+                
+                # Converter figura para imagem
+                img_data = plotly_fig_to_image(figures['roi'], width=700, height=350)
+                img = Image(img_data, width=500, height=280)
+                elements.append(img)
+                elements.append(Spacer(1, 0.2*inch))
+            
+            # Tabela de resumo para ROI
+            roi_data = [["Métrica", "Valor", ""]]
+            
+            if 'Investimento' in results:
+                roi_data.append([
+                    "Investimento em Segurança", 
+                    format_currency(results['Investimento']),
+                    ""
+                ])
+                
+            if 'Economia' in results:
+                roi_data.append([
+                    "Economia Projetada", 
+                    format_currency(results['Economia']),
+                    ""
+                ])
+                
+            if 'ROI' in results:
+                # Formatar o ROI com cor baseada no valor
+                roi_value = results['ROI']
+                roi_color = colors.green if roi_value > 0 else colors.red
+                
+                roi_data.append([
+                    "Retorno sobre Investimento (ROI)", 
+                    Paragraph(f"<font color={roi_color}><b>{format_percent(roi_value)}</b></font>", normal_style),
+                    ""
+                ])
+                
+            if 'Perda de Clientes' in results:
+                roi_data.append([
+                    "Perda de Receita (Clientes)", 
+                    format_currency(results['Perda de Clientes']),
+                    ""
+                ])
+                
+            if 'Impacto Total' in results:
+                roi_data.append([
+                    "Impacto Financeiro Total", 
+                    format_currency(results['Impacto Total']),
+                    ""
+                ])
+                
+            # Adicionar detalhes sobre custos antes e depois
+            if 'Custo Total Antes' in results and 'Custo Total Depois' in results:
+                roi_data.append([
+                    "Custo Total Antes do Investimento", 
+                    format_currency(results['Custo Total Antes']),
+                    ""
+                ])
+                
+                roi_data.append([
+                    "Custo Total Após o Investimento", 
+                    format_currency(results['Custo Total Depois']),
+                    ""
+                ])
+                
+            # Criar tabela de ROI
+            roi_table = Table(roi_data, colWidths=[2.7*inch, 2.0*inch, 1.3*inch])
+            roi_table_style = table_style.copy()
+            roi_table_style.extend([
+                ('BACKGROUND', (0, 2), (-1, 2), colors.lightgrey),
+                ('BACKGROUND', (0, 4), (-1, 4), colors.lightgrey),
+                ('BACKGROUND', (0, 6), (-1, 6), colors.lightgrey),
+            ])
+            roi_table.setStyle(TableStyle(roi_table_style))
+            elements.append(roi_table)
+            
+            # Explicação sobre o ROI
+            if 'ROI' in results:
+                roi_value = results['ROI']
+                elements.append(Spacer(1, 0.2*inch))
+                
+                if roi_value > 100:
+                    roi_explanation = """
+                    <b>ROI EXCEPCIONAL:</b> O investimento em segurança está gerando um retorno excepcional. 
+                    Os custos evitados superam significativamente o valor investido, demonstrando alta eficácia das medidas implementadas.
+                    """
+                elif roi_value > 0:
+                    roi_explanation = """
+                    <b>ROI POSITIVO:</b> O investimento em segurança está gerando retorno positivo. 
+                    As medidas implementadas estão reduzindo efetivamente os custos com incidentes de segurança.
+                    """
+                else:
+                    roi_explanation = """
+                    <b>ROI NEGATIVO:</b> O investimento em segurança ainda não está gerando retorno positivo. 
+                    Recomenda-se avaliar a eficácia das medidas implementadas e considerar ajustes na estratégia de segurança.
+                    """
+                
+                elements.append(Paragraph(roi_explanation, normal_style))
+                
+            elements.append(Spacer(1, 0.3*inch))
+            
+            # Detalhes sobre incidentes
+            elements.append(Paragraph("Análise de Incidentes", section_style))
+            
+            incidents_data = [["Métrica", "Antes do Investimento", "Após o Investimento"]]
+            
+            if 'Num Incidentes Antes' in results and 'Num Incidentes Depois' in results:
+                incidents_data.append([
+                    "Número de Incidentes", 
+                    str(results['Num Incidentes Antes']),
+                    str(results['Num Incidentes Depois'])
+                ])
+                
+            if 'Custo por Incidente Antes' in results and 'Custo por Incidente Depois' in results:
+                incidents_data.append([
+                    "Custo por Incidente", 
+                    format_currency(results['Custo por Incidente Antes']),
+                    format_currency(results['Custo por Incidente Depois'])
+                ])
+                
+            if 'Horas por Incidente Antes' in results and 'Horas por Incidente Depois' in results:
+                incidents_data.append([
+                    "Tempo de Resolução", 
+                    format_hours(results['Horas por Incidente Antes']),
+                    format_hours(results['Horas por Incidente Depois'])
+                ])
+                
+            incidents_table = Table(incidents_data, colWidths=[2.0*inch, 2.0*inch, 2.0*inch])
+            incidents_table_style = [
+                # Cabeçalho
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
+                
+                # Corpo da tabela
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                ('TEXTCOLOR', (0, 1), (0, -1), colors.black),
+                ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+                ('FONTNAME', (0, 1), (0, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+                ('TOPPADDING', (0, 1), (-1, -1), 6),
+                
+                # Valores (colunas 1 e 2) alinhados à direita
+                ('ALIGN', (1, 1), (2, -1), 'RIGHT'),
+                
+                # Linhas alternadas
+                ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),
+                ('BACKGROUND', (0, 3), (-1, 3), colors.lightgrey),
+                
+                # Bordas
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ]
+            incidents_table.setStyle(TableStyle(incidents_table_style))
+            elements.append(incidents_table)
+            
+            # Adicionar gráficos de pizza se disponíveis
+            if figures and 'pie_before' in figures and 'pie_after' in figures:
+                elements.append(Spacer(1, 0.2*inch))
+                elements.append(Paragraph("Comparação de Custos Antes e Depois", section_style))
+                
+                # Criar tabela para acomodar os dois gráficos lado a lado
+                img_before = plotly_fig_to_image(figures['pie_before'], width=350, height=300)
+                img_after = plotly_fig_to_image(figures['pie_after'], width=350, height=300)
+                
+                before_img = Image(img_before, width=250, height=200)
+                after_img = Image(img_after, width=250, height=200)
+                
+                data = [[before_img, after_img]]
+                t = Table(data, colWidths=[250, 250])
+                t.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                elements.append(t)
+                
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # SEÇÃO 3: BENCHMARKING
+        if 'Média do Setor' in results and 'Diferença com Setor' in results:
+            elements.append(Paragraph("PARTE 3: ANÁLISE COMPARATIVA DE BENCHMARKING", subtitle_style))
+            
+            # Adicionar gráfico de radar se disponível
+            if figures and 'radar' in figures:
+                elements.append(Paragraph("Comparação por Categoria com o Setor", section_style))
+                
+                # Converter figura para imagem
+                img_data = plotly_fig_to_image(figures['radar'], width=600, height=400)
+                img = Image(img_data, width=450, height=300)
+                elements.append(img)
+                elements.append(Spacer(1, 0.2*inch))
+            
+            # Adicionar gráfico de comparação com todos os setores se disponível
+            if figures and 'all_sectors' in figures:
+                elements.append(Paragraph("Comparação com Todos os Setores", section_style))
+                
+                # Converter figura para imagem
+                img_data = plotly_fig_to_image(figures['all_sectors'], width=700, height=400)
+                img = Image(img_data, width=500, height=280)
+                elements.append(img)
+                elements.append(Spacer(1, 0.2*inch))
+            
+            # Tabela de resumo para benchmarking
+            bench_data = [["Métrica", "Valor", "Status"]]
+            
+            if 'Pontuação Geral' in results:
+                bench_data.append([
+                    "Pontuação da Empresa", 
+                    format_percent(results['Pontuação Geral']),
+                    ""
+                ])
+                
+            if 'Média do Setor' in results:
+                bench_data.append([
+                    "Média do Setor", 
+                    format_percent(results['Média do Setor']),
+                    ""
+                ])
+                
+            if 'Diferença com Setor' in results:
+                # Formatar a diferença com cor baseada no valor
+                diff_value = results['Diferença com Setor']
+                diff_color = colors.green if diff_value >= 0 else colors.red
+                diff_status = "Acima da Média" if diff_value >= 0 else "Abaixo da Média"
+                
+                bench_data.append([
+                    "Diferença", 
+                    Paragraph(f"<font color={diff_color}><b>{diff_value:+.1f}%</b></font>", normal_style),
+                    diff_status
+                ])
+                
+            # Adicionar detalhes por categoria se disponíveis
+            if 'Pontuação Infraestrutura' in results:
+                bench_data.append([
+                    "Infraestrutura", 
+                    format_percent(results['Pontuação Infraestrutura']),
+                    ""
+                ])
+                
+            if 'Pontuação Políticas' in results:
+                bench_data.append([
+                    "Políticas", 
+                    format_percent(results['Pontuação Políticas']),
+                    ""
+                ])
+                
+            if 'Pontuação Proteção' in results:
+                bench_data.append([
+                    "Proteção", 
+                    format_percent(results['Pontuação Proteção']),
+                    ""
+                ])
+                
+            # Criar tabela de benchmarking
+            bench_table = Table(bench_data, colWidths=[2.4*inch, 1.8*inch, 1.8*inch])
+            bench_table_style = table_style.copy()
+            bench_table_style.extend([
+                ('BACKGROUND', (0, 2), (-1, 2), colors.lightgrey),
+                ('BACKGROUND', (0, 4), (-1, 4), colors.lightgrey),
+            ])
+            bench_table.setStyle(TableStyle(bench_table_style))
+            elements.append(bench_table)
+            
+            # Explicação sobre o benchmarking
+            if 'Diferença com Setor' in results:
+                diff_value = results['Diferença com Setor']
+                elements.append(Spacer(1, 0.2*inch))
+                
+                if diff_value >= 10:
+                    benchmark_explanation = """
+                    <b>DESTAQUE NO SETOR:</b> A empresa está significativamente acima da média do setor em segurança da informação.
+                    Esta posição de liderança representa uma vantagem competitiva e demonstra excelência nas práticas de segurança.
+                    """
+                elif diff_value >= 0:
+                    benchmark_explanation = """
+                    <b>ACIMA DA MÉDIA:</b> A empresa está acima da média do setor em segurança da informação.
+                    Esta posição favorável demonstra boas práticas, mas ainda há oportunidades para ampliar a vantagem competitiva.
+                    """
+                elif diff_value >= -10:
+                    benchmark_explanation = """
+                    <b>PRÓXIMO À MÉDIA:</b> A empresa está ligeiramente abaixo da média do setor em segurança da informação.
+                    É recomendável implementar melhorias para, no mínimo, alcançar o padrão do setor.
+                    """
+                else:
+                    benchmark_explanation = """
+                    <b>SIGNIFICATIVAMENTE ABAIXO DA MÉDIA:</b> A empresa está consideravelmente abaixo da média do setor em segurança da informação.
+                    Esta posição representa uma vulnerabilidade competitiva e exige atenção imediata para implementar melhorias.
+                    """
+                
+                elements.append(Paragraph(benchmark_explanation, normal_style))
+            
+            elements.append(Spacer(1, 0.3*inch))
+        
+        # SEÇÃO 4: RECOMENDAÇÕES CONSOLIDADAS
+        if recommendations:
+            elements.append(Paragraph("RECOMENDAÇÕES CONSOLIDADAS", subtitle_style))
+            
+            # Agrupar recomendações por categorias para melhor organização
+            infra_recs = []
+            policy_recs = []
+            protect_recs = []
+            other_recs = []
+            
+            for rec in recommendations:
+                if any(term in rec.lower() for term in ["firewall", "autenticação", "mfa", "backup", "criptografia", "servidor"]):
+                    infra_recs.append(rec)
+                elif any(term in rec.lower() for term in ["política", "treinamento", "conscientização", "plano", "norma"]):
+                    policy_recs.append(rec)
+                elif any(term in rec.lower() for term in ["senha", "ataque", "invasão", "ameaça", "vazamento", "proteção"]):
+                    protect_recs.append(rec)
+                else:
+                    other_recs.append(rec)
+            
+            # Adicionar recomendações por categoria
+            if infra_recs:
+                elements.append(Paragraph("Infraestrutura e Tecnologia", section_style))
+                for i, rec in enumerate(infra_recs, 1):
+                    rec_text = Paragraph(
+                        f"<strong>{i}.</strong> {rec}",
+                        ParagraphStyle(
+                            'RecStyle',
+                            parent=styles['Normal'],
+                            fontSize=10,
+                            textColor=colors.darkgreen,
+                            leftIndent=15,
+                            spaceBefore=6,
+                            spaceAfter=6
+                        )
+                    )
+                    elements.append(rec_text)
+            
+            if policy_recs:
+                elements.append(Paragraph("Políticas e Procedimentos", section_style))
+                for i, rec in enumerate(policy_recs, 1):
+                    rec_text = Paragraph(
+                        f"<strong>{i}.</strong> {rec}",
+                        ParagraphStyle(
+                            'RecStyle',
+                            parent=styles['Normal'],
+                            fontSize=10,
+                            textColor=colors.darkgreen,
+                            leftIndent=15,
+                            spaceBefore=6,
+                            spaceAfter=6
+                        )
+                    )
+                    elements.append(rec_text)
+            
+            if protect_recs:
+                elements.append(Paragraph("Proteção Contra Ameaças", section_style))
+                for i, rec in enumerate(protect_recs, 1):
+                    rec_text = Paragraph(
+                        f"<strong>{i}.</strong> {rec}",
+                        ParagraphStyle(
+                            'RecStyle',
+                            parent=styles['Normal'],
+                            fontSize=10,
+                            textColor=colors.darkgreen,
+                            leftIndent=15,
+                            spaceBefore=6,
+                            spaceAfter=6
+                        )
+                    )
+                    elements.append(rec_text)
+            
+            if other_recs:
+                elements.append(Paragraph("Recomendações Gerais", section_style))
+                for i, rec in enumerate(other_recs, 1):
+                    rec_text = Paragraph(
+                        f"<strong>{i}.</strong> {rec}",
+                        ParagraphStyle(
+                            'RecStyle',
+                            parent=styles['Normal'],
+                            fontSize=10,
+                            textColor=colors.darkgreen,
+                            leftIndent=15,
+                            spaceBefore=6,
+                            spaceAfter=6
+                        )
+                    )
+                    elements.append(rec_text)
+            
+        # SEÇÃO 5: PRÓXIMOS PASSOS E CONCLUSÃO
+        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Paragraph("PRÓXIMOS PASSOS RECOMENDADOS", subtitle_style))
+        
+        next_steps = [
+            "Priorize as vulnerabilidades críticas identificadas e crie um plano de ação com prazos definidos.",
+            "Implemente as recomendações de segurança de acordo com o ROI projetado, começando pelas medidas de maior impacto.",
+            "Realize uma nova avaliação de segurança em 3-6 meses para medir o progresso e identificar novas áreas de melhoria.",
+            "Considere a realização de treinamentos de conscientização em segurança para todos os funcionários.",
+            "Desenvolva ou atualize o plano de resposta a incidentes de segurança da informação."
+        ]
+        
+        for i, step in enumerate(next_steps, 1):
+            step_text = Paragraph(
+                f"<strong>{i}.</strong> {step}",
+                ParagraphStyle(
+                    'StepStyle',
+                    parent=styles['Normal'],
+                    fontSize=10,
+                    textColor=colors.black,
+                    leftIndent=15,
+                    spaceBefore=6,
+                    spaceAfter=6
+                )
+            )
+            elements.append(step_text)
+        
+        # Conclusão
+        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Paragraph("CONCLUSÃO", subtitle_style))
+        
+        conclusion_text = f"""Este relatório apresenta uma análise completa da postura de segurança da {company_name}. 
+        Com base nas avaliações realizadas, identificamos as principais áreas de vulnerabilidade, analisamos o retorno 
+        sobre investimento em segurança e comparamos o desempenho da empresa com a média do setor.
+        
+        A implementação das recomendações apresentadas neste relatório ajudará a fortalecer significativamente a postura de 
+        segurança da empresa, reduzir riscos de violações de dados e garantir conformidade com regulamentações de segurança 
+        da informação.
+        
+        Recomendamos a realização de novas avaliações periódicas para medir o progresso e manter as práticas de segurança 
+        atualizadas frente às ameaças em constante evolução."""
+        
+        elements.append(Paragraph(conclusion_text, normal_style))
     
-    # Criar tabela com estilo melhorado
-    # Ajustar larguras de coluna com base no tipo de relatório
-    if report_type == "roi":
-        # Para ROI, dar mais espaço para os valores monetários
-        col_widths = [2.7*inch, 2.0*inch, 1.3*inch]
     else:
-        col_widths = [2.4*inch, 1.8*inch, 1.8*inch]
+        # Tratamento para relatórios individuais (código original)
+        # Determinar que tipo de relatório estamos gerando com base nas chaves presentes
+        report_type = ""
+        if 'Pontuação Geral' in results and 'Pontuação Infraestrutura' in results:
+            report_type = "vulnerability"
+        elif 'Investimento' in results and 'Economia' in results:
+            report_type = "roi"
+        elif 'Média do Setor' in results and 'Diferença' in results:
+            report_type = "benchmark"
         
-    table = Table(table_data, colWidths=col_widths)
-    
-    # Estilo da tabela mais sofisticado
-    table_style = [
-        # Cabeçalho
-        ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-        ('TOPPADDING', (0, 0), (-1, 0), 8),
+        # Resumo de resultados com formatação baseada no tipo de relatório
+        if report_type == "vulnerability":
+            elements.append(Paragraph("RESUMO DA AVALIAÇÃO DE VULNERABILIDADE", subtitle_style))
+            
+            # Tabela de resumo para relatório de vulnerabilidade
+            table_data = [["Métrica", "Valor", "Classificação"]]
+            
+            # Pontuação geral com destaque
+            risk_level = results.get('Nível de Risco', '')
+            risk_color = colors.red if risk_level == "Crítico" else colors.orange if risk_level == "Moderado" else colors.green
+            
+            table_data.append([
+                Paragraph("<b>Pontuação Geral</b>", normal_style),
+                Paragraph(f"<b>{format_percent(results['Pontuação Geral'])}</b>", normal_style),
+                Paragraph(f"<font color={risk_color}><b>{risk_level}</b></font>", normal_style)
+            ])
+            
+            # Outras métricas
+            if 'Pontuação Infraestrutura' in results:
+                table_data.append([
+                    "Infraestrutura", 
+                    format_percent(results['Pontuação Infraestrutura']),
+                    ""
+                ])
+            
+            if 'Pontuação Políticas' in results:
+                table_data.append([
+                    "Políticas", 
+                    format_percent(results['Pontuação Políticas']),
+                    ""
+                ])
+                
+            if 'Pontuação Proteção' in results:
+                table_data.append([
+                    "Proteção", 
+                    format_percent(results['Pontuação Proteção']),
+                    ""
+                ])
+                
+            if 'Total de Vulnerabilidades' in results:
+                table_data.append([
+                    "Vulnerabilidades Detectadas", 
+                    str(results['Total de Vulnerabilidades']),
+                    ""
+                ])
+                
+        elif report_type == "roi":
+            elements.append(Paragraph("ANÁLISE DE RETORNO SOBRE INVESTIMENTO (ROI)", subtitle_style))
+            
+            # Tabela de resumo para relatório de ROI
+            table_data = [["Métrica", "Valor", ""]]
+            
+            if 'Investimento' in results:
+                table_data.append([
+                    "Investimento em Segurança", 
+                    format_currency(results['Investimento']),
+                    ""
+                ])
+                
+            if 'Economia' in results:
+                table_data.append([
+                    "Economia Projetada", 
+                    format_currency(results['Economia']),
+                    ""
+                ])
+                
+            if 'ROI' in results:
+                # Formatar o ROI com cor baseada no valor
+                roi_value = results['ROI']
+                roi_color = colors.green if roi_value > 0 else colors.red
+                
+                table_data.append([
+                    "Retorno sobre Investimento (ROI)", 
+                    Paragraph(f"<font color={roi_color}><b>{format_percent(roi_value)}</b></font>", normal_style),
+                    ""
+                ])
+                
+            if 'Perda de Clientes' in results:
+                table_data.append([
+                    "Perda de Receita (Clientes)", 
+                    format_currency(results['Perda de Clientes']),
+                    ""
+                ])
+                
+            if 'Impacto Total' in results:
+                table_data.append([
+                    "Impacto Financeiro Total", 
+                    format_currency(results['Impacto Total']),
+                    ""
+                ])
+                
+        elif report_type == "benchmark":
+            elements.append(Paragraph("ANÁLISE COMPARATIVA DE BENCHMARKING", subtitle_style))
+            
+            # Tabela de resumo para relatório de benchmarking
+            table_data = [["Métrica", "Valor", "Status"]]
+            
+            if 'Pontuação Geral' in results:
+                table_data.append([
+                    "Pontuação da Empresa", 
+                    format_percent(results['Pontuação Geral']),
+                    ""
+                ])
+                
+            if 'Média do Setor' in results:
+                table_data.append([
+                    "Média do Setor", 
+                    format_percent(results['Média do Setor']),
+                    ""
+                ])
+                
+            if 'Diferença' in results:
+                # Formatar a diferença com cor baseada no valor
+                diff_value = results['Diferença']
+                diff_color = colors.green if diff_value >= 0 else colors.red
+                diff_status = results.get('Nível de Risco', '')
+                
+                table_data.append([
+                    "Diferença", 
+                    Paragraph(f"<font color={diff_color}><b>{diff_value:+.1f}%</b></font>", normal_style),
+                    diff_status
+                ])
+                
+            if 'Pontuação Infraestrutura' in results:
+                table_data.append([
+                    "Infraestrutura", 
+                    format_percent(results['Pontuação Infraestrutura']),
+                    ""
+                ])
+                
+            if 'Pontuação Políticas' in results:
+                table_data.append([
+                    "Políticas", 
+                    format_percent(results['Pontuação Políticas']),
+                    ""
+                ])
+                
+            if 'Pontuação Proteção' in results:
+                table_data.append([
+                    "Proteção", 
+                    format_percent(results['Pontuação Proteção']),
+                    ""
+                ])
+        else:
+            # Relatório genérico se não for identificado um tipo específico
+            elements.append(Paragraph("RESUMO DE RESULTADOS", subtitle_style))
+            
+            # Tabela de dados genérica
+            table_data = [["Métrica", "Valor", ""]]
+            for key, value in results.items():
+                # Determinar o formato adequado com base no nome da chave e no tipo do valor
+                if isinstance(value, (int, float)) and 'percent' in key.lower() or key.lower() in ['roi', 'pontuação']:
+                    formatted_value = format_percent(value)
+                elif isinstance(value, (int, float)) and any(term in key.lower() for term in ['custo', 'valor', 'preço', 'investimento']):
+                    formatted_value = format_currency(value)
+                else:
+                    formatted_value = str(value)
+                    
+                table_data.append([key, formatted_value, ""])
         
-        # Corpo da tabela
-        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-        ('TEXTCOLOR', (0, 1), (0, -1), colors.black),
-        ('ALIGN', (0, 1), (0, -1), 'LEFT'),
-        ('FONTNAME', (0, 1), (0, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        # Criar tabela com estilo melhorado
+        # Ajustar larguras de coluna com base no tipo de relatório
+        if report_type == "roi":
+            # Para ROI, dar mais espaço para os valores monetários
+            col_widths = [2.7*inch, 2.0*inch, 1.3*inch]
+        else:
+            col_widths = [2.4*inch, 1.8*inch, 1.8*inch]
+            
+        table = Table(table_data, colWidths=col_widths)
         
-        # Valores (coluna do meio) alinhados à direita
-        ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
-        ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
+        # Estilo da tabela mais sofisticado
+        table_style = [
+            # Cabeçalho
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            
+            # Corpo da tabela
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (0, -1), colors.black),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            
+            # Valores (coluna do meio) alinhados à direita
+            ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+            ('FONTNAME', (1, 1), (1, -1), 'Helvetica'),
+            
+            # Classificação (última coluna) centralizada
+            ('ALIGN', (2, 1), (2, -1), 'CENTER'),
+            
+            # Linhas alternadas com cores suaves
+            ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),
+            ('BACKGROUND', (0, 3), (-1, 3), colors.lightgrey),
+            ('BACKGROUND', (0, 5), (-1, 5), colors.lightgrey),
+            
+            # Bordas refinadas
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('LINEABOVE', (0, 1), (-1, 1), 1, colors.black),
+        ]
         
-        # Classificação (última coluna) centralizada
-        ('ALIGN', (2, 1), (2, -1), 'CENTER'),
+        table.setStyle(TableStyle(table_style))
+        elements.append(table)
+        elements.append(Spacer(1, 0.3*inch))
         
-        # Linhas alternadas com cores suaves
-        ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),
-        ('BACKGROUND', (0, 3), (-1, 3), colors.lightgrey),
-        ('BACKGROUND', (0, 5), (-1, 5), colors.lightgrey),
-        
-        # Bordas refinadas
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ('LINEABOVE', (0, 1), (-1, 1), 1, colors.black),
-    ]
-    
-    table.setStyle(TableStyle(table_style))
-    elements.append(table)
-    elements.append(Spacer(1, 0.3*inch))
-    
-    # Adicionar vulnerabilidades
-    if vulnerabilities:
-        elements.append(Spacer(1, 0.2*inch))
-        elements.append(Paragraph("VULNERABILIDADES IDENTIFICADAS", subtitle_style))
-        
-        # Criar lista numerada de vulnerabilidades para melhor legibilidade
-        for i, vuln in enumerate(vulnerabilities, 1):
-            # Usar parágrafos em vez de tabela para melhor formatação de texto
-            vuln_text = Paragraph(
-                f"<strong>{i}.</strong> {vuln}",
-                ParagraphStyle(
-                    'VulnStyle',
-                    parent=styles['Normal'],
-                    fontSize=10,
-                    textColor=colors.darkred,
-                    leftIndent=15,
-                    spaceBefore=6,
-                    spaceAfter=6
+        # Adicionar vulnerabilidades
+        if vulnerabilities:
+            elements.append(Spacer(1, 0.2*inch))
+            elements.append(Paragraph("VULNERABILIDADES IDENTIFICADAS", subtitle_style))
+            
+            # Criar lista numerada de vulnerabilidades para melhor legibilidade
+            for i, vuln in enumerate(vulnerabilities, 1):
+                # Usar parágrafos em vez de tabela para melhor formatação de texto
+                vuln_text = Paragraph(
+                    f"<strong>{i}.</strong> {vuln}",
+                    ParagraphStyle(
+                        'VulnStyle',
+                        parent=styles['Normal'],
+                        fontSize=10,
+                        textColor=colors.darkred,
+                        leftIndent=15,
+                        spaceBefore=6,
+                        spaceAfter=6
+                    )
                 )
-            )
-            elements.append(vuln_text)
+                elements.append(vuln_text)
+            
+            elements.append(Spacer(1, 0.2*inch))
         
-        elements.append(Spacer(1, 0.2*inch))
-    
-    # Adicionar recomendações
-    if recommendations:
-        elements.append(Spacer(1, 0.2*inch))
-        elements.append(Paragraph("RECOMENDAÇÕES DE MELHORIA", subtitle_style))
-        
-        # Criar lista de recomendações com ícones
-        for i, rec in enumerate(recommendations, 1):
-            # Usar parágrafos para melhor formatação
-            rec_text = Paragraph(
-                f"<strong>{i}.</strong> {rec}",
-                ParagraphStyle(
-                    'RecStyle',
-                    parent=styles['Normal'],
-                    fontSize=10,
-                    textColor=colors.darkgreen,
-                    leftIndent=15,
-                    spaceBefore=6,
-                    spaceAfter=6
+        # Adicionar recomendações
+        if recommendations:
+            elements.append(Spacer(1, 0.2*inch))
+            elements.append(Paragraph("RECOMENDAÇÕES DE MELHORIA", subtitle_style))
+            
+            # Criar lista de recomendações com ícones
+            for i, rec in enumerate(recommendations, 1):
+                # Usar parágrafos para melhor formatação
+                rec_text = Paragraph(
+                    f"<strong>{i}.</strong> {rec}",
+                    ParagraphStyle(
+                        'RecStyle',
+                        parent=styles['Normal'],
+                        fontSize=10,
+                        textColor=colors.darkgreen,
+                        leftIndent=15,
+                        spaceBefore=6,
+                        spaceAfter=6
+                    )
                 )
-            )
-            elements.append(rec_text)
+                elements.append(rec_text)
     
     # Adicionar observações finais
     elements.append(Spacer(1, 0.5*inch))
@@ -449,7 +1134,13 @@ def create_pdf_report(results, vulnerabilities, recommendations, company_name="S
         subtitle_style
     ))
     
-    if report_type == "vulnerability":
+    if report_type == "complete":
+        obs_text = """Este relatório completo apresenta uma visão abrangente da segurança de dados da sua empresa, 
+        incluindo avaliação de vulnerabilidades, análise de ROI em segurança e benchmarking comparativo com o setor. 
+        As recomendações apresentadas devem ser implementadas de acordo com a prioridade, começando pelas vulnerabilidades 
+        mais críticas. Recomenda-se repetir esta avaliação periodicamente para medir o progresso e ajustar a estratégia 
+        de segurança conforme necessário."""
+    elif report_type == "vulnerability":
         obs_text = """Este relatório apresenta uma avaliação do nível de segurança de dados da sua empresa com base nas respostas fornecidas. 
         As recomendações devem ser implementadas de acordo com a prioridade das vulnerabilidades identificadas. 
         Recomenda-se realizar uma nova avaliação após a implementação das melhorias."""
@@ -1806,8 +2497,102 @@ else:
             all_results["Média do Setor"] = st.session_state.benchmark_results["Industry"]["Total"]
             all_results["Diferença com Setor"] = st.session_state.benchmark_results["Company"]["Total"] - st.session_state.benchmark_results["Industry"]["Total"]
         
-        # Criar PDF para download
-        pdf_data = create_pdf_report(all_results, all_vulnerabilities, all_recommendations, st.session_state.user_data['empresa'])
+        # Coletar os gráficos gerados
+        figures = {}
+
+        # Verificar quais gráficos estão disponíveis e adicioná-los
+        if has_vulnerability:
+            # Adicionar gráfico do velocímetro
+            gauge_chart = create_gauge_chart_plotly(st.session_state.vulnerability_results["Pontuação Geral"])
+            figures['gauge'] = gauge_chart
+            
+            # Adicionar gráfico de categorias
+            category_scores = {
+                "Infraestrutura": st.session_state.vulnerability_results["Pontuação Infraestrutura"],
+                "Políticas": st.session_state.vulnerability_results["Pontuação Políticas"],
+                "Proteção": st.session_state.vulnerability_results["Pontuação Proteção"]
+            }
+            category_chart = create_category_chart_plotly(category_scores)
+            figures['category'] = category_chart
+
+        if has_roi:
+            # Adicionar gráfico de ROI
+            investment = st.session_state.roi_results["Investimento"]
+            total_before = st.session_state.roi_results.get("Custo Total Antes", 0)
+            total_after = st.session_state.roi_results.get("Custo Total Depois", 0)
+            roi_chart = create_roi_chart_plotly(investment, total_before, total_after)
+            figures['roi'] = roi_chart
+            
+            # Dados para gráficos de pizza
+            cost_breakdown_before = {
+                "Custos diretos com incidentes": st.session_state.roi_results.get('Num Incidentes Antes', 0) * st.session_state.roi_results.get('Custo por Incidente Antes', 0),
+                "Custos com horas de trabalho": st.session_state.roi_results.get('Num Incidentes Antes', 0) * st.session_state.roi_results.get('Horas por Incidente Antes', 0) * st.session_state.roi_results.get('hourly_cost', 0)
+            }
+            
+            cost_breakdown_after = {
+                "Custos diretos com incidentes": st.session_state.roi_results.get('Num Incidentes Depois', 0) * st.session_state.roi_results.get('Custo por Incidente Depois', 0),
+                "Custos com horas de trabalho": st.session_state.roi_results.get('Num Incidentes Depois', 0) * st.session_state.roi_results.get('Horas por Incidente Depois', 0) * st.session_state.roi_results.get('hourly_cost', 0)
+            }
+            
+            pie_before = create_pie_chart_plotly(cost_breakdown_before, "Custos Antes do Investimento")
+            pie_after = create_pie_chart_plotly(cost_breakdown_after, "Custos Após o Investimento")
+            
+            figures['pie_before'] = pie_before
+            figures['pie_after'] = pie_after
+
+        if has_benchmark:
+            # Adicionar gráfico de radar para benchmarking
+            company_scores = st.session_state.benchmark_results["Company"]
+            industry_data = get_benchmark_data()
+            industry = st.session_state.benchmark_results["IndustryName"]
+            
+            radar_chart = create_radar_chart(company_scores, industry_data, industry)
+            figures['radar'] = radar_chart
+            
+            # Preparar dados para o gráfico de todos os setores
+            all_industries_data = []
+            for ind in industry_data.keys():
+                all_industries_data.append({
+                    'Setor': ind,
+                    'Pontuação': industry_data[ind]['Total']
+                })
+            
+            # Adicionar a empresa
+            all_industries_data.append({
+                'Setor': 'Sua Empresa',
+                'Pontuação': company_scores['Total']
+            })
+            
+            all_industries_df = pd.DataFrame(all_industries_data)
+            all_industries_df = all_industries_df.sort_values('Pontuação', ascending=False)
+            
+            fig_all = px.bar(
+                all_industries_df,
+                x='Setor',
+                y='Pontuação',
+                text_auto='.1f',
+                title='Comparação com Todos os Setores',
+                color='Setor',
+                color_discrete_map={
+                    'Sua Empresa': 'blue',
+                    **{ind: 'lightgreen' if ind == industry else 'lightgray' for ind in industry_data.keys()}
+                }
+            )
+            
+            fig_all.update_layout(
+                yaxis_title='Pontuação (%)',
+                yaxis=dict(range=[0, 100]),
+                xaxis_title='',
+                height=500
+            )
+            
+            figures['all_sectors'] = fig_all
+        
+        # Criar PDF para download com o novo parâmetro "figures"
+        pdf_data = create_pdf_report(all_results, all_vulnerabilities, all_recommendations, 
+                                   st.session_state.user_data['empresa'], 
+                                   report_type="complete", 
+                                   figures=figures)
         
         # Seção de download com destaque
         st.markdown("### 📥 Download do Relatório Completo")
@@ -1818,6 +2603,7 @@ else:
         - Recomendações personalizadas
         - Análise financeira de ROI (se realizada)
         - Benchmarking do setor (se realizado)
+        - Todos os gráficos e visualizações gerados durante a análise
         """)
         
         # Botão para download do relatório PDF completo em destaque
