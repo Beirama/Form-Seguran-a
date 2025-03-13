@@ -1,3 +1,8 @@
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
+import json
+import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -37,6 +42,65 @@ except locale.Error:
             except locale.Error:
                 # Se nenhum locale português estiver disponível, usar o padrão do sistema
                 locale.setlocale(locale.LC_ALL, '')
+
+# Função para inicializar o Firebase (será chamada automaticamente quando necessário)
+def initialize_firebase():
+    """Inicializa a conexão com o Firebase se ainda não estiver inicializada"""
+    if not firebase_admin._apps:
+        try:
+            # Para Streamlit Cloud: usar secrets no novo formato
+            if 'firebase' in st.secrets:
+                # Obter todas as configurações necessárias dos secrets
+                firebase_config = {
+                    "type": st.secrets.firebase.type,
+                    "project_id": st.secrets.firebase.project_id,
+                    "private_key_id": st.secrets.firebase.private_key_id,
+                    "private_key": st.secrets.firebase.private_key,
+                    "client_email": st.secrets.firebase.client_email,
+                    "client_id": st.secrets.firebase.client_id,
+                    "auth_uri": st.secrets.firebase.auth_uri,
+                    "token_uri": st.secrets.firebase.token_uri,
+                    "auth_provider_x509_cert_url": st.secrets.firebase.auth_provider_x509_cert_url,
+                    "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
+                }
+                
+                # Alternativa: se a codificação base64 for usada
+                # import base64
+                # if 'firebase_json_base64' in st.secrets:
+                #     json_str = base64.b64decode(st.secrets.firebase_json_base64).decode('utf-8')
+                #     firebase_config = json.loads(json_str)
+                
+                cred = credentials.Certificate(firebase_config)
+                firebase_admin.initialize_app(cred)
+                return True
+        except Exception as e:
+            # Em caso de erro, apenas continue - a aplicação funciona sem o Firebase
+            print(f"Erro ao inicializar Firebase: {e}")
+            return False
+    return True
+
+# Função para salvar um usuário no Firestore
+def save_user_to_firebase(user_data):
+    """Salva os dados do usuário no Firestore silenciosamente"""
+    try:
+        # Inicializar Firebase
+        if not initialize_firebase():
+            return False
+        
+        # Conectar ao Firestore
+        db = firestore.client()
+        
+        # Adicionar timestamp de cadastro
+        user_data['data_cadastro'] = datetime.now()
+        
+        # Salvar no Firestore (coleção 'usuarios')
+        db.collection('usuarios').add(user_data)
+        return True
+    except Exception as e:
+        # Em caso de erro, apenas continue - o usuário não precisa saber
+        # que houve falha ao salvar no Firebase
+        print(f"Erro ao salvar no Firebase: {e}")
+        return False
 
 # Função para formatar valores monetários sem depender totalmente do locale
 def format_currency(value):
@@ -1502,29 +1566,44 @@ def validate_email(email):
 
 # Função para salvar dados do usuário
 def save_user_data():
-    st.session_state.user_data['nome_completo'] = st.session_state.nome_completo
-    st.session_state.user_data['telefone'] = st.session_state.telefone
-    st.session_state.user_data['email'] = st.session_state.email
-    st.session_state.user_data['empresa'] = st.session_state.empresa
-    st.session_state.user_data['industry'] = st.session_state.industry  # Corrigido: Guardar o setor selecionado
+    # Obter os dados do formulário
+    user_data = {
+        'nome_completo': st.session_state.nome_completo,
+        'telefone': st.session_state.telefone,
+        'email': st.session_state.email,
+        'empresa': st.session_state.empresa,
+        'industry': st.session_state.industry
+    }
+    
+    # Salvar no user_data para uso na aplicação (manter o comportamento atual)
+    st.session_state.user_data['nome_completo'] = user_data['nome_completo']
+    st.session_state.user_data['telefone'] = user_data['telefone']
+    st.session_state.user_data['email'] = user_data['email']
+    st.session_state.user_data['empresa'] = user_data['empresa']
+    st.session_state.user_data['industry'] = user_data['industry']
     
     # Validar dados antes de prosseguir
-    if not st.session_state.nome_completo:
+    if not user_data['nome_completo']:
         st.error("Por favor, informe seu nome completo.")
         return False
     
-    if not validate_phone(st.session_state.telefone):
+    if not validate_phone(user_data['telefone']):
         st.error("Por favor, informe um número de telefone válido com DDD.")
         return False
     
-    if not validate_email(st.session_state.email):
+    if not validate_email(user_data['email']):
         st.error("Por favor, informe um endereço de e-mail válido.")
         return False
     
-    if not st.session_state.empresa:
+    if not user_data['empresa']:
         st.error("Por favor, informe o nome da sua empresa.")
         return False
     
+    # Tentar salvar no Firebase silenciosamente (sem feedback ao usuário)
+    # Se falhar, a aplicação continua normalmente
+    save_user_to_firebase(user_data)
+    
+    # Retornar sucesso de qualquer forma para o fluxo da aplicação continuar
     return True
 
 # Função para inicializar as variáveis de estado da sessão
