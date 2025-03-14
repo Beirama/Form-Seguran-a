@@ -201,16 +201,18 @@ def get_benchmark_data():
 
 # Função para criar PDF completo com os resultados
 def create_pdf_report(results, vulnerabilities, recommendations, company_name="Sua Empresa", report_type=None, figures=None):
-    buffer = io.BytesIO()
-    # Usar margens menores para mais espaço útil na página
-    doc = SimpleDocTemplate(
-        buffer, 
-        pagesize=A4,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
+    # Verificar se há dados suficientes para gerar o relatório
+    if not results or len(results) == 0:
+        # Retornar um PDF vazio ou básico quando não há dados suficientes
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=A4,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36
+        )
     styles = getSampleStyleSheet()
     elements = []
     
@@ -2668,10 +2670,14 @@ else:
             figures['all_sectors'] = fig_all
         
         # Criar PDF para download com o novo parâmetro "figures"
-        pdf_data = create_pdf_report(all_results, all_vulnerabilities, all_recommendations, 
-                                   st.session_state.user_data['empresa'], 
-                                   report_type="complete", 
-                                   figures=figures)
+            if all_results and len(all_results) > 0:
+                               pdf_data = create_pdf_report(all_results, all_vulnerabilities, all_recommendations, 
+                               st.session_state.user_data['empresa'], 
+                               report_type="complete", 
+                               figures=figures)
+            else:
+                                # Criar um PDF básico sem dados de avaliação
+                                pdf_data = create_pdf_report({}, [], [], st.session_state.user_data['empresa'])
         
         # Seção de download com destaque
         st.markdown("### 📥 Download do Relatório Completo")
