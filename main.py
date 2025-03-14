@@ -201,18 +201,18 @@ def get_benchmark_data():
 
 # Função para criar PDF completo com os resultados
 def create_pdf_report(results, vulnerabilities, recommendations, company_name="Sua Empresa", report_type=None, figures=None):
-    # Verificar se há dados suficientes para gerar o relatório
-    if not results or len(results) == 0:
-        # Retornar um PDF vazio ou básico quando não há dados suficientes
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer, 
-            pagesize=A4,
-            rightMargin=36,
-            leftMargin=36,
-            topMargin=36,
-            bottomMargin=36
-        )
+    # Inicializar buffer e documento
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=A4,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
+    
+    # Inicializar estilos e elementos
     styles = getSampleStyleSheet()
     elements = []
     
@@ -259,14 +259,29 @@ def create_pdf_report(results, vulnerabilities, recommendations, company_name="S
         textColor=colors.gray
     )
     
-    # Cabeçalho do relatório
+    # Verificar se há dados suficientes para gerar o relatório completo
+    if not results or len(results) == 0:
+        # Relatório básico quando não há dados suficientes
+        elements.append(Paragraph("RELATÓRIO DE SEGURANÇA DE DADOS", title_style))
+        elements.append(Paragraph(f"{company_name}", subtitle_style))
+        elements.append(Paragraph(f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", date_style))
+        elements.append(Spacer(1, 0.5*inch))
+        elements.append(Paragraph("Não há dados suficientes para gerar um relatório detalhado.", normal_style))
+        
+        # Construir o documento básico e retornar
+        doc.build(elements)
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        return pdf_data
+    
+    # Cabeçalho do relatório para relatórios com dados
     if report_type == "complete":
         elements.append(Paragraph(f"RELATÓRIO COMPLETO DE SEGURANÇA DE DADOS", title_style))
     else:
         elements.append(Paragraph(f"RELATÓRIO DE SEGURANÇA DE DADOS", title_style))
-    elements.append(Paragraph(f"{company_name}", subtitle_style))
-    elements.append(Paragraph(f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", date_style))
-    elements.append(Spacer(1, 0.5*inch))
+        elements.append(Paragraph(f"{company_name}", subtitle_style))
+        elements.append(Paragraph(f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", date_style))
+        elements.append(Spacer(1, 0.5*inch))
     
     # Relatório Completo - incluindo todas as análises
     if report_type == "complete":
