@@ -1563,7 +1563,24 @@ def validate_phone(phone):
 
 # Validar formato de e-mail
 def validate_email(email):
-    email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+    # Verificações básicas antes da regex
+    if not email or '@' not in email:
+        return False
+        
+    # Dividir o email em parte local e domínio
+    try:
+        local_part, domain = email.rsplit('@', 1)
+    except ValueError:
+        return False
+        
+    # Verificar se o domínio tem pelo menos um ponto
+    if '.' not in domain:
+        return False
+        
+    # Expressão regular mais permissiva para validar e-mails
+    # Permite TLDs mais longos (.info, .store, etc) e mais caracteres especiais
+    email_pattern = re.compile(r'^[a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$')
+    
     return bool(email_pattern.match(email))
 
 # Função para salvar dados do usuário
@@ -2669,15 +2686,24 @@ else:
             
             figures['all_sectors'] = fig_all
         
-        # Criar PDF para download com o novo parâmetro "figures"
+# Criar PDF para download com o novo parâmetro "figures"
+        try:
             if all_results and len(all_results) > 0:
-                               pdf_data = create_pdf_report(all_results, all_vulnerabilities, all_recommendations, 
-                               st.session_state.user_data['empresa'], 
-                               report_type="complete", 
-                               figures=figures)
+                pdf_data = create_pdf_report(
+                    all_results, 
+                    all_vulnerabilities, 
+                    all_recommendations, 
+                    st.session_state.user_data['empresa'], 
+                    report_type="complete", 
+                    figures=figures
+                )
             else:
-                                # Criar um PDF básico sem dados de avaliação
-                                pdf_data = create_pdf_report({}, [], [], st.session_state.user_data['empresa'])
+                # Criar um PDF básico sem dados de avaliação
+                pdf_data = create_pdf_report({}, [], [], st.session_state.user_data['empresa'])
+        except Exception as e:
+            st.error(f"Erro ao gerar o relatório. Por favor, tente novamente.")
+            # Garantir que pdf_data seja definido mesmo em caso de erro
+            pdf_data = None
         
         # Seção de download com destaque
         st.markdown("### 📥 Download do Relatório Completo")
@@ -2694,14 +2720,17 @@ else:
         # Botão para download do relatório PDF completo em destaque
         centered_col = st.columns([1, 2, 1])[1]  # Criar uma coluna centralizada
         with centered_col:
-            st.markdown(
-                get_pdf_download_link(
-                    pdf_data, 
-                    f"relatorio_completo_{st.session_state.user_data['empresa'].replace(' ', '_')}.pdf", 
-                    "📥 BAIXAR RELATÓRIO COMPLETO EM PDF"
-                ), 
-                unsafe_allow_html=True
-            )
+            if pdf_data is not None:
+                st.markdown(
+                    get_pdf_download_link(
+                        pdf_data, 
+                        f"relatorio_completo_{st.session_state.user_data['empresa'].replace(' ', '_')}.pdf", 
+                        "📥 BAIXAR RELATÓRIO COMPLETO EM PDF"
+                    ), 
+                    unsafe_allow_html=True
+                )
+            else:
+                st.error("Não foi possível gerar o relatório PDF. Por favor, tente novamente.")
         
         st.markdown("---")
         
